@@ -63,15 +63,28 @@ class BlogsController < ApplicationController
 
   def import
     file = params[:attachment]
-    data = CSV.parse(file.to_io, headers: true, encoding: 'utf8')
-    # Start code to handle CSV data
-    ActiveRecord::Base.transaction do
-      data.each do |row|
-        current_user.blogs.create!(row.to_h)
-      end
+  
+    unless file.present?
+      redirect_to blogs_path, alert: 'No file attached'
+      return
     end
-    # End code to handle CSV data
-    redirect_to blogs_path
+  
+    # Use Tempfile safely and enqueue the job
+    begin
+      Tempfile.open(['import', '.csv']) do |tempfile|
+        tempfile.binmode
+        tempfile.write(file.read)
+        tempfile.flush
+  
+        # Enqueue the background job with the temporary file path
+        BlogImportJob.perform_later(tempfile.path, current_user.id)
+      end
+  
+      redirect_to blogs_path, notice: 'Blogs are being imported. You will be notified once completed.'
+    rescue => e
+      Rails.logger.error "Blog Import Error: #{e.message}\n#{e.backtrace.join("\n")}"
+      redirect_to blogs_path, alert: "Failed to import blogs: #{e.message}"
+    end
   end
 
   private
